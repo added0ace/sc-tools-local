@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SC Tools Pro</title>
+    <style>
+        :root { --bg: #0f0f13; --card: #1e1e24; --primary: #00d2ff; --secondary: #ff0055; --text: #ffffff; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        h1 { font-size: 2.5rem; background: linear-gradient(90deg, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .container { width: 100%; max-width: 500px; gap: 20px; }
+        .card { background: var(--card); border-radius: 15px; padding: 25px; margin-bottom: 20px; border: 1px solid #333; }
+        .file-upload { display: block; width: 100%; }
+        .file-upload input[type="file"] { display: none; }
+        .file-upload label { display: block; background: #2a2a35; padding: 15px; border-radius: 8px; border: 2px dashed #444; text-align: center; cursor: pointer; }
+        button { width: 100%; margin-top: 15px; padding: 12px; border: none; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer; }
+        .btn-decode { background: var(--primary); color: #000; }
+        .btn-encode { background: var(--secondary); color: #fff; }
+        #progress-container { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 999; justify-content: center; align-items: center; }
+        .progress-box { background: var(--card); padding: 30px; border-radius: 15px; width: 80%; max-width: 400px; text-align: center; border: 1px solid var(--primary); }
+        .bar-bg { background: #333; height: 10px; border-radius: 5px; margin: 15px 0; overflow: hidden; }
+        .bar-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--secondary)); width: 0%; transition: width 0.3s; }
+    </style>
+</head>
+<body>
+    <h1>SC Tools Pro</h1>
+    <div class="container">
+        <div class="card">
+            <h2 style="color:var(--primary)">🔓 DECODE (.sc / .sctx)</h2>
+            <div class="file-upload">
+                <label for="decode-file" id="label-decode">📂 Выбрать файл...</label>
+                <input type="file" id="decode-file" onchange="document.getElementById('label-decode').innerText = '📄 ' + this.files[0].name">
+            </div>
+            <button class="btn-decode" onclick="startProcess('decode')">РАСПАКОВАТЬ</button>
+        </div>
+        <div class="card">
+            <h2 style="color:var(--primary)">🔒 ENCODE (.zip)</h2>
+            <div class="file-upload">
+                <label for="encode-file" id="label-encode">📂 Выбрать ZIP...</label>
+                <input type="file" id="encode-file" accept=".zip" onchange="document.getElementById('label-encode').innerText = '📄 ' + this.files[0].name">
+            </div>
+            <button class="btn-encode" onclick="startProcess('encode')">ЗАПАКОВАТЬ</button>
+        </div>
+    </div>
+    <div id="progress-container">
+        <div class="progress-box">
+            <span id="percent-text" style="font-size: 1.5rem; font-weight: bold;">0%</span>
+            <div class="bar-bg"><div class="bar-fill" id="bar-fill"></div></div>
+            <div id="status-text" style="color: #ccc;">Ожидание...</div>
+        </div>
+    </div>
+
+    <script>
+        function startProcess(type) {
+            const fileInput = document.getElementById(type === 'decode' ? 'decode-file' : 'encode-file');
+            if (fileInput.files.length === 0) return alert("Сначала выберите файл!");
+            document.getElementById('progress-container').style.display = 'flex';
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            fetch(type === 'decode' ? '/upload_decode' : '/upload_encode', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.task_id) pollStatus(data.task_id);
+                });
+        }
+
+        function pollStatus(taskId) {
+            const interval = setInterval(() => {
+                fetch('/status/' + taskId).then(r => r.json()).then(data => {
+                    document.getElementById('status-text').innerText = data.message;
+                    document.getElementById('percent-text').innerText = data.percent + "%";
+                    document.getElementById('bar-fill').style.width = data.percent + "%";
+                    if (data.status === 'done') {
+                        clearInterval(interval);
+                        document.getElementById('progress-container').style.display = 'none';
+                        window.location.href = data.download_url;
+                    } else if (data.status === 'error') {
+                        clearInterval(interval);
+                        alert("ERROR: " + data.message);
+                        document.getElementById('progress-container').style.display = 'none';
+                    }
+                });
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
