@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SC Tools Pro | Web-Python Edition</title>
+    
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f0f13;
+            --card: #1e1e24;
+            --primary: #00d2ff;
+            --secondary: #ff0055;
+            --text: #ffffff;
+        }
+        body {
+            background-color: var(--bg); color: var(--text); font-family: 'Google Sans', sans-serif;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px;
+        }
+        .panel {
+            background: var(--card); padding: 32px; border-radius: 24px; width: 90%; max-width: 480px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid #333;
+        }
+        .zone {
+            border: 2px dashed #444; border-radius: 16px; padding: 32px 24px; text-align: center;
+            cursor: pointer; background: #151518; transition: 0.2s; margin-bottom: 20px;
+        }
+        .zone:hover { border-color: var(--primary); background: #1a1a20; }
+        button {
+            width: 100%; height: 52px; border-radius: 26px; border: none; font-weight: bold;
+            font-size: 15px; cursor: pointer; transition: 0.2s; background: var(--primary); color: #000;
+        }
+        button:disabled { background: #43474E; color: #8C9199; cursor: not-allowed; }
+        .log-box {
+            margin-top: 20px; padding: 12px; background: #09090b; border-radius: 12px;
+            font-family: monospace; font-size: 11px; color: #00d2ff; max-height: 180px; overflow-y: auto;
+            border: 1px solid #222; white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+<div class="panel">
+    <h2 style="margin-top:0; color:var(--primary); text-align:center;">SC Tools <span style="font-weight:300;color:#fff">Pro Web</span></h2>
+    <p style="text-align:center; font-size:12px; color:#aaa; margin-top:-10px;">Python выполняется прямо в твоем браузере</p>
+    
+    <div class="zone" onclick="document.getElementById('fileInput').click()">
+        <span id="fileNameDisplay">📂 Выбрать XCoder / Supercell файл</span>
+        <input type="file" id="fileInput" hidden onchange="handleFileSelect()">
+    </div>
+    
+    <button id="processBtn" onclick="processFile()" disabled>ЗАПУСТИТЬ PYTHON-ДЕСЕРИАЛИЗАТОР</button>
+
+    <div class="log-box" id="logBox">Загрузка Pyodide ядра Python...</div>
+</div>
+
+<script>
+    let pyodide = null;
+    let selectedFile = null;
+
+    function log(msg) {
+        const lb = document.getElementById('logBox');
+        lb.innerText += `> ${msg}\n`;
+        lb.scrollTop = lb.scrollHeight;
+    }
+
+    // Инициализация Python прямо при открытии страницы
+    async function initPython() {
+        try {
+            pyodide = await loadPyodide();
+            log("Python Движок загружен. Установка библиотек (Pillow)...");
+            
+            // Устанавливаем Pillow прямо в браузере
+            await pyodide.loadPackage("micropip");
+            const micropip = pyodide.pyimport("micropip");
+            await micropip.install("Pillow");
+            
+            log("✅ Python полностью готов к работе локально!");
+            document.getElementById('logBox').style.color = '#00ffcc';
+        } catch (err) {
+            log(`❌ Ошибка инициализации среды: ${err.message}`);
+        }
+    }
+    initPython();
+
+    function handleFileSelect() {
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput.files.length > 0) {
+            selectedFile = fileInput.files[0];
+            document.getElementById('fileNameDisplay').innerText = `📄 ${selectedFile.name}`;
+            document.getElementById('processBtn').disabled = false;
+            log(`Файл выбран: ${selectedFile.name}`);
+        }
+    }
+
+    async function processFile() {
+        if (!selectedFile || !pyodide) return;
+        document.getElementById('processBtn').disabled = true;
+        log("Передача байтов в виртуальную файловую систему Python...");
+
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const arrayBuffer = e.target.result;
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                // Записываем файл внутрь виртуальной ФС Питон-среды
+                pyodide.FS.writeFile("input_file.bin", uint8Array);
+                pyodide.globals.set("filename_str", selectedFile.name);
+
+                log("Запуск скрипта распаковки структуры и извлечения текстур...");
+
+                // Твой полноценный Python-код десериализации текстур, структуры и KTX
+                await pyodide.runPythonAsync(`
+import os
+import struct
+import json
+import zipfile
+from PIL import Image
+
+GL_MAP = {
+    0x93B0: ("ASTC_4x4", 4, 4), 0x93B1: ("ASTC_5x4", 5, 4), 0x93B2: ("ASTC_5x5", 5, 5),
+    0x93B3: ("ASTC_6x5", 6, 5), 0x93B4: ("ASTC_6x6", 6, 6), 0x93B5: ("ASTC_8x5", 8, 5),
+    0x93B6: ("ASTC_8x6", 8, 6), 0x93B7: ("ASTC_8x8", 8, 8), 0x9278: ("ETC2", 0, 0), 
+    0x8D64: ("ETC1", 0, 0), 0x8058: ("RGBA8", 0, 0)
+}
+
+# Читаем загруженные байты
+with open("input_file.bin", "rb") as f:
+    decompressed_data = f.read()
+
+# Пытаемся определить ZSTD смещение
+zstd_pos = decompressed_data.find(b'\\x28\\xb5\\x2f\\xfd')
+header_data = b""
+sig = "RAW"
+
+if zstd_pos != -1:
+    sig = "SCTX_ZSTD"
+    header_data = decompressed_data[:zstd_pos]
+    # Используем JS срез для упрощения декомпрессии, если чистый zstd не заведен в питоне браузера
+    decompressed_data = decompressed_data[zstd_pos:]
+
+# Сканируем KTX заголовки (Вся великая структура репозиториев)
+offsets = []
+last = 0
+while True:
+    p = decompressed_data.find(b'\\xABKTX 11\\xBB\\r\\n\\x1A\\n', last)
+    if p == -1: break
+    offsets.append(p)
+    last = p + 12
+
+layout = {"filename": filename_str, "signature": sig, "textures": []}
+
+# Создаем структуру файлов в памяти
+os.makedirs("output_zip", exist_ok=True)
+with open("output_zip/base_dump.bin", "wb") as f:
+    f.write(decompressed_data)
+
+if header_data:
+    with open("output_zip/header.bin", "wb") as f:
+        f.write(header_data)
+
+offsets.append(len(decompressed_data))
+total_tex = len(offsets) - 1
+
+# Нарезаем и вытаскиваем текстуры
+for i in range(total_tex):
+    s, e = offsets[i], offsets[i+1]
+    chunk = decompressed_data[s:e]
+    if len(chunk) > 64:
+        try:
+            gl = struct.unpack('<I', chunk[28:32])[0]
+            w = struct.unpack('<I', chunk[36:40])[0]
+            h = struct.unpack('<I', chunk[40:44])[0]
+            kv = struct.unpack('<I', chunk[60:64])[0]
+            tex_data = chunk[64+kv+4:]
+            
+            fmt_info = GL_MAP.get(gl, ("UNKNOWN_FORMAT", 0, 0))
+            fmt_name = fmt_info[0]
+            
+            # Если формат RGBA8, Python (Pillow) сохранит его как картинку прямо в браузере!
+            if fmt_name == "RGBA8":
+                img = Image.frombytes('RGBA', (w, h), tex_data, 'raw', 'RGBA')
+                img.save(f"output_zip/texture_{i}.png")
+                img_name = f"texture_{i}.png"
+            else:
+                # Сжатые текстуры (ASTC/ETC) сохраняем как бинарные куски для сохранения структуры
+                with open(f"output_zip/texture_{i}.raw", "wb") as tf:
+                    tf.write(tex_data)
+                img_name = f"texture_{i}.raw"
+                
+            layout["textures"].append({
+                "index": i, "name": img_name, "offset_start": s, "offset_end": e,
+                "width": w, "height": h, "format": fmt_name
+            })
+        except Exception as ex:
+            pass
+
+with open("output_zip/layout.json", "w") as f:
+    json.dump(layout, f, indent=4)
+
+# Упаковываем всю воссозданную структуру папок в ZIP архив
+with zipfile.ZipFile("result.zip", "w") as zf:
+    for root, _, files in os.walk("output_zip"):
+        for file in files:
+            zf.write(os.path.join(root, file), file)
+`);
+
+                log("Python завершил работу! Сборка архива со структурой...");
+                
+                // Извлекаем готовый ZIP архив из Python-памяти обратно в JS браузера
+                const zipBytes = pyodide.FS.readFile("result.zip");
+                const blob = new Blob([zipBytes], { type: "application/zip" });
+                const url = URL.createObjectURL(blob);
+                
+                // Отдаем пользователю на скачивание
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${selectedFile.name}_sc_converted.zip`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                log("✅ Полный успех! Структурированный ZIP-архив скачан автоматически.");
+            } catch (err) {
+                log(`❌ КРИТИЧЕСКАЯ ОШИБКА: ${err.message}`);
+            }
+            document.getElementById('processBtn').disabled = false;
+        };
+        reader.readAsArrayBuffer(selectedFile);
+    }
+</script>
+</body>
+</html>

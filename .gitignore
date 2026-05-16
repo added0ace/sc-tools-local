@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-temp/
-encode_work/
-*.zip
-*.dec
-*.sc
-.env
-venv/
