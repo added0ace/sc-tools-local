@@ -1,5 +1,0 @@
-flask
-zstandard
-pillow
-texture2ddecoder
-sc-compression

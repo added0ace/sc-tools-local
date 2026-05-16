@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SC Tools | Pure Web Edition</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #121214; color: #E2E2E6; font-family: 'Google Sans', sans-serif;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0;
+        }
+        .panel {
+            background: #1A1A1E; padding: 32px; border-radius: 24px; width: 90%; max-width: 450px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4); border: 1px solid #2A2A30;
+        }
+        .zone {
+            border: 2px dashed #43474E; border-radius: 16px; padding: 32px 24px; text-align: center;
+            cursor: pointer; background: #222226; transition: 0.2s; margin-bottom: 20px;
+        }
+        .zone:hover { border-color: #a0c9ff; background: #262930; }
+        button {
+            width: 100%; height: 52px; border-radius: 26px; border: none; font-weight: 500;
+            font-size: 15px; cursor: pointer; transition: 0.2s; background: #a0c9ff; color: #003258;
+        }
+        button:disabled { background: #43474E; color: #8C9199; cursor: not-allowed; }
+        .log-box {
+            margin-top: 20px; padding: 12px; background: #0E0E10; border-radius: 12px;
+            font-family: monospace; font-size: 12px; color: #A0C9FF; max-height: 150px; overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div class="panel">
+    <h2 style="margin-top:0; color:#a0c9ff; text-align:center;">SC Tools <span style="font-weight:300;color:#fff">Web</span></h2>
+    
+    <div class="zone" onclick="document.getElementById('fileInput').click()">
+        <span id="fileNameDisplay">📄 Выбрать файл (.sc / .sctx)</span>
+        <input type="file" id="fileInput" hidden onchange="handleFileSelect()">
+    </div>
+    
+    <button id="processBtn" onclick="processFile()" disabled>РАСПАКОВАТЬ В БРАУЗЕРЕ</button>
+
+    <div class="log-box" id="logBox">Ожидание файла...</div>
+</div>
+
+<script>
+    let selectedFile = null;
+
+    function log(message) {
+        const lb = document.getElementById('logBox');
+        lb.innerHTML += `<div>> ${message}</div>`;
+        lb.scrollTop = lb.scrollHeight;
+    }
+
+    function handleFileSelect() {
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput.files.length > 0) {
+            selectedFile = fileInput.files[0];
+            document.getElementById('fileNameDisplay').innerText = selectedFile.name;
+            document.getElementById('processBtn').disabled = false;
+            log(`Файл выбран: ${selectedFile.name} (${(selectedFile.size / 1024).toFixed(2)} KB)`);
+        }
+    }
+
+    async function processFile() {
+        if (!selectedFile) return;
+        
+        document.getElementById('processBtn').disabled = true;
+        log("Чтение файла в память...");
+        
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+                const buffer = new Uint8Array(e.target.result);
+                let decompressedData = buffer;
+                let isZstd = false;
+                
+                const zstdMagic = [0x28, 0xB5, 0x2F, 0xFD];
+                let zstdPos = -1;
+                
+                for(let i=0; i < Math.min(buffer.length, 100); i++) {
+                    if (buffer[i] === zstdMagic[0] && buffer[i+1] === zstdMagic[1] && 
+                        buffer[i+2] === zstdMagic[2] && buffer[i+3] === zstdMagic[3]) {
+                        zstdPos = i;
+                        isZstd = true;
+                        break;
+                    }
+                }
+                
+                if (isZstd) {
+                    log(`Найден ZSTD контейнер (смещение: ${zstdPos}). Распаковка...`);
+                    const zstdData = buffer.slice(zstdPos);
+                    decompressedData = window.fzstd.decompress(zstdData);
+                    log(`Успешно! Исходный размер: ${decompressedData.length} байт`);
+                } else {
+                    log("ZSTD не найден. Попытка чтения как RAW/LZMA...");
+                }
+
+                log("Создание ZIP архива...");
+                const zipFiles = {};
+                
+                zipFiles["base_dump.bin"] = decompressedData;
+                
+                if (isZstd && zstdPos > 0) {
+                    zipFiles["header.bin"] = buffer.slice(0, zstdPos);
+                }
+
+                const zipBuffer = fflate.zipSync(zipFiles);
+                
+                log("Генерация ссылки на скачивание...");
+                const blob = new Blob([zipBuffer], { type: "application/zip" });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = selectedFile.name + "_extracted.zip";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                log("✅ Готово! Архив скачан.");
+            } catch (err) {
+                log(`❌ Ошибка: ${err.message}`);
+            }
+            document.getElementById('processBtn').disabled = false;
+        };
+        reader.readAsArrayBuffer(selectedFile);
+    }
+</script>
+</body>
+</html>
